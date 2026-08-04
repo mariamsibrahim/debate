@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+apps/web
+.git
+dist
+**/dist
+.next
+**/*.log
+.DS_Store

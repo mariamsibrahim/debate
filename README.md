@@ -18,6 +18,9 @@ not built here — see the blueprint).
   phase timing tables, WebSocket event contracts) shared by both apps so the
   backend's authoritative timer and the frontend's countdown can't drift.
 
+Want it running online instead of just locally? See [DEPLOY.md](./DEPLOY.md)
+for the Render (API + Postgres) + Vercel (web) walkthrough.
+
 ## Setup
 
 ```bash
