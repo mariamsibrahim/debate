@@ -1,0 +1,45 @@
+{
+  "name": "@debate/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start:dev": "nodemon --watch src --ext ts --exec ts-node -r tsconfig-paths/register src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "ts-node --transpile-only prisma/seed.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@nestjs/common": "^10.4.6",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/core": "^10.4.6",
+    "@nestjs/jwt": "^10.2.0",
+    "@nestjs/platform-express": "^10.4.6",
+    "@nestjs/platform-socket.io": "^10.4.6",
+    "@nestjs/websockets": "^10.4.6",
+    "@prisma/client": "^5.22.0",
+    "bcrypt": "^5.1.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^10.4.6",
+    "@types/bcrypt": "^5.0.2",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.9.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.7",
+    "prisma": "^5.22.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.6.3"
+  }
+}

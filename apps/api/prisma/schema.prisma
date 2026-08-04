@@ -1,0 +1,309 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum TopicCategoryName {
+  POLITICS
+  SCIENCE
+  HISTORY
+  TECHNOLOGY
+  SPORTS
+  ENTERTAINMENT
+  PHILOSOPHY
+  ECONOMICS
+  GENERAL
+}
+
+enum Difficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum TopicStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum DebateFormat {
+  BLITZ
+  STANDARD
+  CASUAL
+}
+
+enum DebateStatus {
+  WAITING
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+enum DebateSide {
+  PROPOSITION
+  OPPOSITION
+}
+
+enum DebateResult {
+  WIN
+  LOSS
+  DRAW
+}
+
+enum DebateEventType {
+  MESSAGE
+  PHASE_CHANGE
+  MODERATOR_FLAG
+  SYSTEM
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum ModerationStage {
+  WARNING
+  FORMAL_WARNING
+  TEMP_BAN
+  PERMANENT_BAN
+}
+
+enum CmmOutcome {
+  PENDING
+  NO_CHANGE
+  PARTIAL
+  COMPLETE
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  email              String              @unique
+  passwordHash       String
+  status             UserStatus          @default(ACTIVE)
+  createdAt          DateTime            @default(now())
+
+  profile            Profile?
+  ratings            Rating[]
+  trustScore         TrustScore?
+  debateParticipants DebateParticipant[]
+  reportsMade        Report[]            @relation("ReporterReports")
+  moderationActions  ModerationAction[]
+  achievements       UserAchievement[]
+  bookmarks          Bookmark[]
+  cmmPosts           ChangeMyMindPost[]
+  followers          Follow[]            @relation("UserFollowers")
+  following          Follow[]            @relation("UserFollowing")
+}
+
+model Profile {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id])
+  username             String   @unique
+  bio                  String?
+  country              String?
+  politicalPreference  String?
+  interests            String[] @default([])
+  favoriteTopics       String[] @default([])
+  avatarUrl            String?
+  createdAt            DateTime @default(now())
+}
+
+model Rating {
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id])
+  category    TopicCategoryName
+  elo         Int               @default(1000)
+  gamesPlayed Int               @default(0)
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([userId, category])
+}
+
+model TrustScore {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id])
+  civility   Int      @default(75)
+  accuracy   Int      @default(75)
+  evidence   Int      @default(75)
+  openMinded Int      @default(75)
+  updatedAt  DateTime @updatedAt
+}
+
+model Topic {
+  id               String            @id @default(cuid())
+  title            String
+  category         TopicCategoryName
+  subcategory      String?
+  difficulty       Difficulty        @default(INTERMEDIATE)
+  popularity       Int               @default(50)
+  controversy      Int               @default(50)
+  qualityScore     Int               @default(70)
+  requiresSources  Boolean           @default(true)
+  estDebateMinutes Int               @default(10)
+  isEvergreen      Boolean           @default(true)
+  status           TopicStatus       @default(PUBLISHED)
+  createdAt        DateTime          @default(now())
+
+  debates          Debate[]
+  relationsFrom    TopicRelation[]   @relation("FromTopic")
+  relationsTo      TopicRelation[]   @relation("ToTopic")
+}
+
+model TopicRelation {
+  id          String @id @default(cuid())
+  fromTopicId String
+  toTopicId   String
+  weight      Float  @default(0.5)
+  fromTopic   Topic  @relation("FromTopic", fields: [fromTopicId], references: [id])
+  toTopic     Topic  @relation("ToTopic", fields: [toTopicId], references: [id])
+
+  @@unique([fromTopicId, toTopicId])
+}
+
+model Debate {
+  id          String               @id @default(cuid())
+  topicId     String
+  topic       Topic                @relation(fields: [topicId], references: [id])
+  format      DebateFormat
+  status      DebateStatus         @default(WAITING)
+  isRanked    Boolean              @default(true)
+  currentPhase String              @default("WAITING")
+  phaseEndsAt DateTime?
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime             @default(now())
+
+  participants DebateParticipant[]
+  events       DebateEvent[]
+  scores       DebateScore[]
+}
+
+model DebateParticipant {
+  id        String        @id @default(cuid())
+  debateId  String
+  debate    Debate        @relation(fields: [debateId], references: [id])
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  side      DebateSide
+  result    DebateResult?
+  eloBefore Int?
+  eloAfter  Int?
+
+  @@unique([debateId, userId])
+}
+
+model DebateEvent {
+  id          String          @id @default(cuid())
+  debateId    String
+  debate      Debate          @relation(fields: [debateId], references: [id])
+  actorUserId String?
+  type        DebateEventType
+  payload     Json
+  createdAt   DateTime        @default(now())
+}
+
+model DebateScore {
+  id              String   @id @default(cuid())
+  debateId        String
+  debate          Debate   @relation(fields: [debateId], references: [id])
+  userId          String
+  logic           Int
+  structure       Int
+  evidence        Int
+  clarity         Int
+  persuasiveness  Int
+  respectfulness  Int
+  responsiveness  Int
+  consistency     Int
+  feedback        String
+  createdAt       DateTime @default(now())
+
+  @@unique([debateId, userId])
+}
+
+model Report {
+  id         String       @id @default(cuid())
+  reporterId String
+  reporter   User         @relation("ReporterReports", fields: [reporterId], references: [id])
+  targetType String
+  targetId   String
+  reason     String
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now())
+}
+
+model ModerationAction {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id])
+  stage     ModerationStage
+  reason    String
+  expiresAt DateTime?
+  appealed  Boolean         @default(false)
+  createdAt DateTime        @default(now())
+}
+
+model Achievement {
+  id          String            @id @default(cuid())
+  key         String            @unique
+  name        String
+  description String
+  users       UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  earnedAt      DateTime    @default(now())
+
+  @@unique([userId, achievementId])
+}
+
+model Bookmark {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  targetType String
+  targetId   String
+  createdAt  DateTime @default(now())
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  follower    User     @relation("UserFollowing", fields: [followerId], references: [id])
+  following   User     @relation("UserFollowers", fields: [followingId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+}
+
+model ChangeMyMindPost {
+  id        String     @id @default(cuid())
+  authorId  String
+  author    User       @relation(fields: [authorId], references: [id])
+  belief    String
+  outcome   CmmOutcome @default(PENDING)
+  createdAt DateTime   @default(now())
+}

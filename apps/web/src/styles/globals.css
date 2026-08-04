@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f5f6f3;
+  --surface: #ffffff;
+  --surface-2: #eff1ee;
+  --ink: #1b2027;
+  --ink-muted: #5b6470;
+  --rule: #dadfe0;
+  --brass: #8c611e;
+  --brass-soft: #f3e6cc;
+  --teal: #1e5b5e;
+  --teal-soft: #deebea;
+  --danger: #a8392e;
+  --danger-soft: #f6e1de;
+
+  --font-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a;
+    --surface: #1b1f23;
+    --surface-2: #20252a;
+    --ink: #e9ebec;
+    --ink-muted: #9aa3ab;
+    --rule: #2c3237;
+    --brass: #d9a34e;
+    --brass-soft: #3a2e17;
+    --teal: #5fb0ab;
+    --teal-soft: #16302e;
+    --danger: #e27c6c;
+    --danger-soft: #3a211d;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.font-variant-tabular {
+  font-variant-numeric: tabular-nums;
+}
