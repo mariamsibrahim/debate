@@ -68,3 +68,33 @@ and a durable scheduler — once this needs to run on more than one instance).
 ```bash
 npm test    # Elo math + matchmaking scoring, apps/api
 ```
+
+## Changing the look
+
+Everything visible — every color, font, and corner radius across the whole
+web app — is defined once, in
+[`apps/web/src/styles/globals.css`](./apps/web/src/styles/globals.css). No
+component ever hardcodes a color or font; they all read `bg-brass`,
+`text-ink-muted`, `font-serif`, etc., which [`tailwind.config.ts`](./apps/web/tailwind.config.ts)
+points at the CSS variables defined there. Edit a value in one file, and it
+updates everywhere it's used.
+
+| To change... | Edit... |
+| --- | --- |
+| The primary accent color (buttons, links, rank badges) | `--brass` in `globals.css` |
+| The secondary accent (the "Opposition" side in debates) | `--teal` |
+| Background / card colors | `--bg`, `--surface`, `--surface-2` |
+| Text colors | `--ink`, `--ink-muted` |
+| How rounded corners are, everywhere | `--radius` |
+| Headline/body/data fonts | `--font-serif` / `--font-sans` / `--font-mono` |
+| Dark mode's version of any of the above | the `@media (prefers-color-scheme: dark)` block right below the light values |
+
+Each token is commented in place with what it's used for. There's also a
+`:root[data-theme="dark"]` / `:root[data-theme="light"]` override pair
+already wired up and waiting for a manual light/dark toggle button, if you
+add one later — it isn't hooked up to any UI yet, the app currently just
+follows the OS/browser preference.
+
+To swap in a real webfont instead of the current system-font stacks, add an
+`@font-face` rule to `globals.css` and point `--font-serif` (or `-sans` /
+`-mono`) at its family name — nothing else needs to change.

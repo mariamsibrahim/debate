@@ -2,25 +2,49 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   DESIGN TOKENS — this is the one place to edit to change how Debate looks.
+   Every color, font, and radius used anywhere in apps/web reads from a CSS
+   variable defined here (see tailwind.config.ts, which just points Tailwind
+   classes like `bg-brass` or `rounded` at these same variables). Change a
+   value below and it updates everywhere at once — no hunting through
+   components.
+   ============================================================================ */
+
 :root {
-  --bg: #f5f6f3;
-  --surface: #ffffff;
-  --surface-2: #eff1ee;
-  --ink: #1b2027;
-  --ink-muted: #5b6470;
-  --rule: #dadfe0;
-  --brass: #8c611e;
-  --brass-soft: #f3e6cc;
-  --teal: #1e5b5e;
-  --teal-soft: #deebea;
-  --danger: #a8392e;
+  /* --- Color: light mode ------------------------------------------------ */
+  --bg: #f5f6f3; /* page background */
+  --surface: #ffffff; /* cards, inputs, the debate room */
+  --surface-2: #eff1ee; /* subtly recessed surfaces (badges, table headers) */
+  --ink: #1b2027; /* primary text */
+  --ink-muted: #5b6470; /* secondary text, captions */
+  --rule: #dadfe0; /* borders, dividers */
+
+  --brass: #8c611e; /* Proposition side, rank tiers, primary buttons/links */
+  --brass-soft: #f3e6cc; /* Proposition tint (message bubbles, selected chips) */
+  --teal: #1e5b5e; /* Opposition side, secondary links/info */
+  --teal-soft: #deebea; /* Opposition tint */
+  --danger: #a8392e; /* moderation warnings, destructive actions only */
   --danger-soft: #f6e1de;
 
-  --font-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* --- Shape -------------------------------------------------------------
+     One radius for the whole app. Try 2px for a sharper/legal-document
+     feel, or 12px for a softer, more playful one. */
+  --radius: 6px;
+
+  /* --- Type ----------------------------------------------------------------
+     Swapping in a real webfont: add an @font-face rule below (or a
+     data-URI'd one) and point these at its family name. System stacks are
+     used by default so the app looks native with zero network requests. */
+  --font-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif; /* headings, resolutions */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; /* UI chrome, body */
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; /* scores, timers, ratings */
 }
 
+/* --- Color: dark mode ----------------------------------------------------
+   Followed automatically from OS/browser preference. Kept as a full,
+   independently-tuned palette (not an auto-inversion of light mode) so
+   contrast and the brass/teal accents stay legible on a dark ground. */
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #14171a;
@@ -37,6 +61,44 @@
     --danger-soft: #3a211d;
   }
 }
+
+/* Manual overrides for a future theme toggle (e.g. a button that sets
+   document.documentElement.dataset.theme = "dark" | "light"). Not wired to
+   any UI yet, but here so adding a toggle later is a one-line change, not a
+   new palette. */
+:root[data-theme="dark"] {
+  --bg: #14171a;
+  --surface: #1b1f23;
+  --surface-2: #20252a;
+  --ink: #e9ebec;
+  --ink-muted: #9aa3ab;
+  --rule: #2c3237;
+  --brass: #d9a34e;
+  --brass-soft: #3a2e17;
+  --teal: #5fb0ab;
+  --teal-soft: #16302e;
+  --danger: #e27c6c;
+  --danger-soft: #3a211d;
+}
+:root[data-theme="light"] {
+  --bg: #f5f6f3;
+  --surface: #ffffff;
+  --surface-2: #eff1ee;
+  --ink: #1b2027;
+  --ink-muted: #5b6470;
+  --rule: #dadfe0;
+  --brass: #8c611e;
+  --brass-soft: #f3e6cc;
+  --teal: #1e5b5e;
+  --teal-soft: #deebea;
+  --danger: #a8392e;
+  --danger-soft: #f6e1de;
+}
+
+/* ============================================================================
+   BASE STYLES — layout/reset only. No colors or fonts should be hardcoded
+   below this line; add a token above instead.
+   ============================================================================ */
 
 * {
   box-sizing: border-box;

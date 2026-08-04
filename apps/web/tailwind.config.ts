@@ -1,10 +1,20 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  darkMode: ["class"],
+  // Dark mode is driven by CSS variables (see globals.css: prefers-color-scheme
+  // + [data-theme] overrides), not Tailwind's `dark:` variant — "media" here
+  // is just documentation, no `dark:` classes are used anywhere in the app.
+  darkMode: "media",
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      // `rounded` / `rounded-md` both track the single --radius token in
+      // globals.css, so changing corner roundness anywhere is one edit.
+      borderRadius: {
+        DEFAULT: "var(--radius)",
+        md: "var(--radius)",
+        lg: "calc(var(--radius) + 4px)",
+      },
       colors: {
         bg: "var(--bg)",
         surface: "var(--surface)",
