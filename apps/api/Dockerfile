@@ -4,6 +4,11 @@
 # relative.
 
 FROM node:20-bookworm-slim AS deps
+# Prisma's engine binaries detect the OS's OpenSSL version at both
+# `generate` and runtime; the "slim" image doesn't ship the openssl
+# package, so without this Prisma silently guesses wrong and the schema
+# engine crashes with an empty "Schema engine error:" at startup.
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
@@ -20,6 +25,7 @@ RUN npx prisma generate --schema apps/api/prisma/schema.prisma
 RUN npm run build --workspace=apps/api
 
 FROM node:20-bookworm-slim AS runner
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 WORKDIR /repo
 # Not pruned to production-only deps: `prisma migrate deploy` at startup
