@@ -2,7 +2,7 @@ import { Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { ConnectedSocket, MessageBody, OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, WebSocketGateway, WebSocketServer } from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
-import { DebateSide, MatchmakingJoinPayload } from "@debate/shared";
+import { AI_PRACTICE_USER_ID, AI_PRACTICE_USERNAME, DebateSide, MatchmakingJoinPayload, TopicCategory } from "@debate/shared";
 import { authenticateSocket } from "../common/socket-auth.util";
 import { AuthenticatedUser } from "../common/guards/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
@@ -78,6 +78,42 @@ export class MatchmakingGateway implements OnGatewayConnection, OnGatewayDisconn
     if (user) this.matchmaking.leave(user.id);
   }
 
+  /**
+   * Cold-start mitigation (blueprint §28): when no human opponent shows up,
+   * the client can request a practice debate against the seeded AI
+   * partner instead of waiting on an empty queue forever. Always unranked.
+   */
+  @SubscribeMessage("queue:practiceWithAI")
+  async handlePracticeWithAI(@ConnectedSocket() client: Socket, @MessageBody() payload: MatchmakingJoinPayload) {
+    const user: AuthenticatedUser | undefined = client.data.user;
+    if (!user) return;
+    this.matchmaking.leave(user.id);
+
+    try {
+      const topicId = await this.pickTopicIdForCategory(payload.category, payload.topicId);
+      const { debate, topic, sides } = await this.debatesService.createDebate(topicId, payload.format, false, [
+        { userId: user.id, username: user.username },
+        { userId: AI_PRACTICE_USER_ID, username: AI_PRACTICE_USERNAME },
+      ]);
+
+      this.debatesGateway.registerRuntime(
+        debate.id,
+        topic.title,
+        payload.format,
+        [
+          { userId: user.id, username: user.username, side: sides.get(user.id) as DebateSide },
+          { userId: AI_PRACTICE_USER_ID, username: AI_PRACTICE_USERNAME, side: sides.get(AI_PRACTICE_USER_ID) as DebateSide },
+        ],
+        AI_PRACTICE_USER_ID,
+      );
+
+      client.emit("queue:matched", { debateId: debate.id });
+    } catch (err) {
+      this.logger.error(`Failed to create AI practice debate for ${user.id}: ${err}`);
+      client.emit("error", { message: "Couldn't start a practice debate — please try again." });
+    }
+  }
+
   private async tick() {
     const matches = this.matchmaking.tick();
     for (const { a, b } of matches) {
@@ -124,6 +160,16 @@ export class MatchmakingGateway implements OnGatewayConnection, OnGatewayDisconn
       select: { id: true },
     });
     if (candidates.length === 0) throw new Error(`No published topics available for category ${a.category}`);
+    return candidates[Math.floor(Math.random() * candidates.length)].id;
+  }
+
+  private async pickTopicIdForCategory(category: TopicCategory, topicId?: string): Promise<string> {
+    if (topicId) return topicId;
+    const candidates = await this.prisma.topic.findMany({
+      where: { status: "PUBLISHED", category: category === "GENERAL" ? undefined : category },
+      select: { id: true },
+    });
+    if (candidates.length === 0) throw new Error(`No published topics available for category ${category}`);
     return candidates[Math.floor(Math.random() * candidates.length)].id;
   }
 }

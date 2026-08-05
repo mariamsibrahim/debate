@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import * as bcrypt from "bcrypt";
+import { randomUUID } from "crypto";
+import { AI_PRACTICE_USER_ID, AI_PRACTICE_USERNAME } from "@debate/shared";
 import { EVERGREEN_TOPICS } from "../src/topics/seed-data/evergreen-topics";
 
 const prisma = new PrismaClient();
@@ -51,6 +53,23 @@ async function main() {
     for (const category of ["POLITICS", "SCIENCE", "TECHNOLOGY", "PHILOSOPHY"]) {
       await prisma.rating.create({ data: { userId: user.id, category: category as any, elo: 1000 } });
     }
+  }
+
+  // The AI practice opponent (blueprint §28's cold-start mitigation) has to
+  // be a real User row for DebateParticipant's foreign key, given a fixed
+  // id so both the client and server can recognize it as "not a human."
+  const aiExists = await prisma.user.findUnique({ where: { id: AI_PRACTICE_USER_ID } });
+  if (!aiExists) {
+    const passwordHash = await bcrypt.hash(randomUUID(), 10);
+    await prisma.user.create({
+      data: {
+        id: AI_PRACTICE_USER_ID,
+        email: "ai-practice-partner@debate.internal",
+        passwordHash,
+        profile: { create: { username: AI_PRACTICE_USERNAME, bio: "A Claude-powered practice opponent. Always unranked." } },
+        trustScore: { create: { civility: 100, accuracy: 100, evidence: 100, openMinded: 100 } },
+      },
+    });
   }
 
   console.log("Seed complete.");

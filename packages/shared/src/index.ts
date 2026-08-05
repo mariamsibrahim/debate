@@ -172,6 +172,7 @@ export interface ClientToServerEvents {
   "webrtc:signal": (payload: WebRTCSignalPayload) => void;
   "queue:join": (payload: MatchmakingJoinPayload) => void;
   "queue:leave": () => void;
+  "queue:practiceWithAI": (payload: MatchmakingJoinPayload) => void;
 }
 
 export interface MatchmakingJoinPayload {
@@ -181,6 +182,12 @@ export interface MatchmakingJoinPayload {
   mode: "CASUAL" | "RANKED";
   topicId?: string;
 }
+
+// A fixed, seeded user that stands in as an opponent when no human is
+// available in the queue (blueprint §28's documented cold-start mitigation).
+// Practice debates against it are always unranked.
+export const AI_PRACTICE_USER_ID = "ai-practice-partner";
+export const AI_PRACTICE_USERNAME = "AI Sparring Partner";
 
 // --- Matchmaking --------------------------------------------------------------
 

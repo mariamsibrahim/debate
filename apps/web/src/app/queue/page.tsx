@@ -73,6 +73,13 @@ function QueueContent() {
     setSearching(false);
   }
 
+  function practiceWithAI() {
+    if (!token) return;
+    getSocket(token).emit("queue:practiceWithAI", { category, format, language: "en", mode, topicId });
+  }
+
+  const AI_WAIT_THRESHOLD_SEC = 15;
+
   if (!user) {
     return <p className="text-ink-muted">Sign in to find a debate.</p>;
   }
@@ -87,9 +94,16 @@ function QueueContent() {
         <p className="mb-6 text-sm text-ink-muted">
           {category} · {format} · {mode}
         </p>
-        <button onClick={cancelSearching} className="rounded-md border border-rule px-4 py-2 text-sm hover:border-danger hover:text-danger">
-          Cancel
-        </button>
+        <div className="flex flex-col items-center gap-3">
+          {waitedSec >= AI_WAIT_THRESHOLD_SEC && (
+            <button onClick={practiceWithAI} className="rounded-md bg-teal px-4 py-2 text-sm font-medium text-white">
+              Practice against AI instead
+            </button>
+          )}
+          <button onClick={cancelSearching} className="rounded-md border border-rule px-4 py-2 text-sm hover:border-danger hover:text-danger">
+            Cancel
+          </button>
+        </div>
       </div>
     );
   }

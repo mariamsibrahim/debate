@@ -24,6 +24,7 @@ import { AuthenticatedUser } from "../common/guards/jwt-auth.guard";
 import { DebatesService } from "./debates.service";
 import { ModeratorService } from "../ai/moderator.service";
 import { JudgeService } from "../ai/judge.service";
+import { DebaterService } from "../ai/debater.service";
 import { RatingsService } from "../ratings/ratings.service";
 
 interface RuntimeParticipant {
@@ -41,6 +42,14 @@ interface DebateRuntime {
   participants: RuntimeParticipant[];
   transcript: { senderId: string; side: DebateSide; body: string }[];
   status: "ACTIVE" | "COMPLETED";
+  /** Set when this debate's opponent is the AI practice partner (blueprint §28). */
+  aiUserId?: string;
+  /** Which phaseIndex the AI has already taken its one dedicated-turn shot in, to avoid double-firing. */
+  aiRespondedPhaseIndex: number;
+}
+
+function randomDelayMs(minMs: number, maxMs: number) {
+  return minMs + Math.floor(Math.random() * (maxMs - minMs));
 }
 
 /**
@@ -63,6 +72,7 @@ export class DebatesGateway implements OnGatewayConnection, OnGatewayDisconnect 
     private readonly debatesService: DebatesService,
     private readonly moderator: ModeratorService,
     private readonly judge: JudgeService,
+    private readonly debater: DebaterService,
     private readonly ratings: RatingsService,
   ) {}
 
@@ -81,8 +91,12 @@ export class DebatesGateway implements OnGatewayConnection, OnGatewayDisconnect 
     this.socketsByUser.get(user.id)?.delete(client.id);
   }
 
-  /** Called by MatchmakingGateway once a Debate row exists in the DB. */
-  registerRuntime(debateId: string, topicTitle: string, format: DebateFormat, participants: RuntimeParticipant[]) {
+  /**
+   * Called by MatchmakingGateway once a Debate row exists in the DB. Pass
+   * `aiUserId` (always AI_PRACTICE_USER_ID today) when the opponent is the
+   * AI practice partner rather than a second human.
+   */
+  registerRuntime(debateId: string, topicTitle: string, format: DebateFormat, participants: RuntimeParticipant[], aiUserId?: string) {
     const phases = FORMAT_PHASES[format];
     this.runtimes.set(debateId, {
       topicTitle,
@@ -93,8 +107,11 @@ export class DebatesGateway implements OnGatewayConnection, OnGatewayDisconnect 
       participants,
       transcript: [],
       status: "ACTIVE",
+      aiUserId,
+      aiRespondedPhaseIndex: -1,
     });
     this.schedulePhaseTimer(debateId);
+    this.triggerAiOwnTurnIfDue(debateId);
   }
 
   @SubscribeMessage("debate:join")
@@ -124,39 +141,13 @@ export class DebatesGateway implements OnGatewayConnection, OnGatewayDisconnect 
     const text = body.body.trim().slice(0, 4000);
     if (!text) return;
 
-    const message = {
-      id: randomUUID(),
-      debateId: body.debateId,
-      senderId: user.id,
-      side: participant.side,
-      body: text,
-      createdAt: new Date().toISOString(),
-    };
+    await this.recordAndBroadcastMessage(body.debateId, runtime, user.id, participant.side, text);
 
-    const recentTranscript = runtime.transcript.slice(-6).map((m) => ({ side: m.side, body: m.body }));
-    runtime.transcript.push({ senderId: user.id, side: participant.side, body: text });
-
-    await this.debatesService.appendEvent(body.debateId, user.id, "MESSAGE", message);
-    this.server.to(this.room(body.debateId)).emit("debate:message", message);
-
-    // Fire-and-forget: the Moderator never blocks the sender's message.
-    this.moderator
-      .analyzeMessage({ topicTitle: runtime.topicTitle, recentTranscript, newMessage: { side: participant.side, body: text } })
-      .then((flags) => {
-        for (const flag of flags) {
-          const payload: ModeratorFlagPayload = {
-            id: randomUUID(),
-            debateId: body.debateId,
-            type: flag.type,
-            message: flag.message,
-            targetUserId: user.id,
-            createdAt: new Date().toISOString(),
-          };
-          this.debatesService.appendEvent(body.debateId, null, "MODERATOR_FLAG", payload).catch((err) => this.logger.error(err));
-          this.server.to(this.room(body.debateId)).emit("debate:moderatorFlag", payload);
-        }
-      })
-      .catch((err) => this.logger.error(`Moderator pipeline failed: ${err}`));
+    // If the opponent is the AI and this is a shared-turn phase, have it
+    // react to the human rather than wait for its own dedicated turn.
+    if (runtime.aiUserId && currentPhase.speakingSide === "BOTH") {
+      this.scheduleAiResponse(body.debateId);
+    }
   }
 
   /** Casual Discussion has no timer — either participant can end it manually. */
@@ -186,6 +177,79 @@ export class DebatesGateway implements OnGatewayConnection, OnGatewayDisconnect 
     return `debate:${debateId}`;
   }
 
+  /** Shared by real human messages and AI-generated ones so both go through identical persistence/broadcast/moderation. */
+  private async recordAndBroadcastMessage(debateId: string, runtime: DebateRuntime, senderId: string, side: DebateSide, body: string) {
+    const message = {
+      id: randomUUID(),
+      debateId,
+      senderId,
+      side,
+      body,
+      createdAt: new Date().toISOString(),
+    };
+
+    const recentTranscript = runtime.transcript.slice(-6).map((m) => ({ side: m.side, body: m.body }));
+    runtime.transcript.push({ senderId, side, body });
+
+    await this.debatesService.appendEvent(debateId, senderId, "MESSAGE", message);
+    this.server.to(this.room(debateId)).emit("debate:message", message);
+
+    // Fire-and-forget: the Moderator never blocks the sender's message —
+    // it applies equally to the AI opponent's own arguments.
+    this.moderator
+      .analyzeMessage({ topicTitle: runtime.topicTitle, recentTranscript, newMessage: { side, body } })
+      .then((flags) => {
+        for (const flag of flags) {
+          const payload: ModeratorFlagPayload = {
+            id: randomUUID(),
+            debateId,
+            type: flag.type,
+            message: flag.message,
+            targetUserId: senderId,
+            createdAt: new Date().toISOString(),
+          };
+          this.debatesService.appendEvent(debateId, null, "MODERATOR_FLAG", payload).catch((err) => this.logger.error(err));
+          this.server.to(this.room(debateId)).emit("debate:moderatorFlag", payload);
+        }
+      })
+      .catch((err) => this.logger.error(`Moderator pipeline failed: ${err}`));
+  }
+
+  /** Fires once when a phase begins that is the AI's OWN exclusive turn (openings/closings). */
+  private triggerAiOwnTurnIfDue(debateId: string) {
+    const runtime = this.runtimes.get(debateId);
+    if (!runtime?.aiUserId) return;
+    const aiParticipant = runtime.participants.find((p) => p.userId === runtime.aiUserId);
+    if (!aiParticipant) return;
+
+    const phase = runtime.phases[runtime.phaseIndex];
+    if (phase.speakingSide !== aiParticipant.side) return; // only its own dedicated turn, not BOTH
+    if (runtime.aiRespondedPhaseIndex === runtime.phaseIndex) return;
+    runtime.aiRespondedPhaseIndex = runtime.phaseIndex;
+    this.scheduleAiResponse(debateId);
+  }
+
+  private scheduleAiResponse(debateId: string) {
+    setTimeout(() => this.generateAiTurn(debateId), randomDelayMs(2000, 4500));
+  }
+
+  private async generateAiTurn(debateId: string) {
+    const runtime = this.runtimes.get(debateId);
+    if (!runtime || runtime.status !== "ACTIVE" || !runtime.aiUserId) return;
+    const aiParticipant = runtime.participants.find((p) => p.userId === runtime.aiUserId);
+    if (!aiParticipant) return;
+    const phase = runtime.phases[runtime.phaseIndex];
+    if (phase.speakingSide !== "BOTH" && phase.speakingSide !== aiParticipant.side) return;
+
+    const body = await this.debater.generateArgument({
+      topicTitle: runtime.topicTitle,
+      side: aiParticipant.side,
+      phaseLabel: phase.label,
+      recentTranscript: runtime.transcript.slice(-6).map((m) => ({ side: m.side, body: m.body })),
+    });
+    await this.recordAndBroadcastMessage(debateId, runtime, aiParticipant.userId, aiParticipant.side, body);
+  }
+
   private schedulePhaseTimer(debateId: string) {
     const runtime = this.runtimes.get(debateId);
     if (!runtime) return;
@@ -212,6 +276,7 @@ export class DebatesGateway implements OnGatewayConnection, OnGatewayDisconnect 
     await this.debatesService.setPhase(debateId, phase.key, phaseEndsAt);
     this.server.to(this.room(debateId)).emit("debate:phaseChange", { phase: phase.key, phaseEndsAt: phaseEndsAt?.toISOString() ?? null });
     this.schedulePhaseTimer(debateId);
+    this.triggerAiOwnTurnIfDue(debateId);
   }
 
   private async finalizeDebate(debateId: string) {

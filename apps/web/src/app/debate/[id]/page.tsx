@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
+  AI_PRACTICE_USER_ID,
   DebateMessagePayload,
   DebateStateSnapshot,
   FORMAT_PHASES,
@@ -149,6 +150,7 @@ export default function DebateRoomPage() {
           {state.participants.map((p) => (
             <div key={p.userId} className={`rounded px-2 py-1.5 ${p.side === "PROPOSITION" ? "bg-brass-soft text-brass" : "bg-teal-soft text-teal"}`}>
               {p.username} — {p.side}
+              {p.userId === AI_PRACTICE_USER_ID && <span className="ml-1 opacity-70">(AI)</span>}
             </div>
           ))}
         </div>
