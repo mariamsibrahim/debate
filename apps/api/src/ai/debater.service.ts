@@ -36,7 +36,7 @@ export class DebaterService {
       this.anthropicClient = new Anthropic({ apiKey: anthropicKey });
       this.provider = "anthropic";
     } else if (geminiKey) {
-      const geminiModelName = this.config.get<string>("GEMINI_MODEL", "gemini-2.0-flash");
+      const geminiModelName = this.config.get<string>("GEMINI_MODEL", "gemini-2.0-flash-lite");
       this.geminiModel = new GoogleGenerativeAI(geminiKey).getGenerativeModel({
         model: geminiModelName,
         systemInstruction: DEBATER_SYSTEM_PROMPT,
