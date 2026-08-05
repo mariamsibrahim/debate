@@ -7,13 +7,15 @@ FROM node:20-bookworm-slim AS deps
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
-COPY packages/shared/package.json packages/shared/package.json
+# Full shared source (not just package.json) has to be here BEFORE `npm ci`:
+# the root package.json's `postinstall` runs `npm run build --workspace
+# packages/shared` (tsc) automatically as part of `npm ci`, and that fails
+# with nothing but tsc's own --help text if the source isn't there yet.
+COPY packages/shared packages/shared
 RUN npm ci
 
 FROM deps AS build
-COPY packages/shared packages/shared
 COPY apps/api apps/api
-RUN npm run build --workspace=packages/shared
 RUN npx prisma generate --schema apps/api/prisma/schema.prisma
 RUN npm run build --workspace=apps/api
 
