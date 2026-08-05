@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import { DebateSide, JUDGE_CATEGORIES, JudgeScorecard } from "@debate/shared";
 import { JUDGE_SYSTEM_PROMPT, JUDGE_TOOL, JudgeTranscriptMessage, buildJudgeUserPrompt } from "./prompts/judge.prompt";
 
@@ -10,9 +11,9 @@ export interface JudgeParticipant {
   side: DebateSide;
 }
 
-type Provider = "anthropic" | "gemini" | "stub";
+type Provider = "anthropic" | "gemini" | "groq" | "stub";
 
-const GEMINI_JSON_INSTRUCTIONS = `
+const JSON_MODE_INSTRUCTIONS = `
 
 Respond with ONLY a single JSON object matching this exact shape, no other
 text before or after it:
@@ -29,12 +30,11 @@ Exactly two entries, one per side, both required.`;
  * full transcript. It scores reasoning quality across 8 categories and
  * never evaluates which side of the resolution is "correct".
  *
- * Provider order: Anthropic (forced tool-call — the most auditable, used
- * if ANTHROPIC_API_KEY is set) → Gemini (JSON-mode text generation, parsed
- * and validated in code — used if GEMINI_API_KEY is set instead) → stub.
- * Gemini's function-calling schema uses a different type system than
- * Anthropic's tools; JSON mode (a plain, stable feature of both APIs) gets
- * the same structural guarantee without guessing at that schema shape.
+ * Provider order: Anthropic (forced tool-call, most auditable) → Gemini
+ * (JSON mode) → Groq (JSON mode) → stub. Gemini and Groq both use plain
+ * JSON-mode text generation rather than replicating Anthropic's tool
+ * schema in each provider's own function-calling shape — simpler and
+ * lower-risk than guessing at those schemas' exact types.
  */
 @Injectable()
 export class JudgeService {
@@ -43,11 +43,15 @@ export class JudgeService {
   private readonly anthropicClient: Anthropic | null = null;
   private readonly anthropicModel: string;
   private readonly geminiModel: GenerativeModel | null = null;
+  private readonly groqClient: Groq | null = null;
+  private readonly groqModel: string;
 
   constructor(private readonly config: ConfigService) {
     const anthropicKey = this.config.get<string>("ANTHROPIC_API_KEY");
     const geminiKey = this.config.get<string>("GEMINI_API_KEY");
+    const groqKey = this.config.get<string>("GROQ_API_KEY");
     this.anthropicModel = this.config.get<string>("JUDGE_MODEL", "claude-sonnet-5");
+    this.groqModel = this.config.get<string>("GROQ_MODEL", "llama-3.3-70b-versatile");
 
     if (anthropicKey) {
       this.anthropicClient = new Anthropic({ apiKey: anthropicKey });
@@ -56,13 +60,16 @@ export class JudgeService {
       const geminiModelName = this.config.get<string>("GEMINI_MODEL", "gemini-2.0-flash-lite");
       this.geminiModel = new GoogleGenerativeAI(geminiKey).getGenerativeModel({
         model: geminiModelName,
-        systemInstruction: JUDGE_SYSTEM_PROMPT + GEMINI_JSON_INSTRUCTIONS,
+        systemInstruction: JUDGE_SYSTEM_PROMPT + JSON_MODE_INSTRUCTIONS,
         generationConfig: { responseMimeType: "application/json" },
       });
       this.provider = "gemini";
+    } else if (groqKey) {
+      this.groqClient = new Groq({ apiKey: groqKey });
+      this.provider = "groq";
     } else {
       this.provider = "stub";
-      this.logger.warn("No ANTHROPIC_API_KEY or GEMINI_API_KEY set — AI Judge running in stub mode (neutral flat scorecards).");
+      this.logger.warn("No ANTHROPIC_API_KEY, GEMINI_API_KEY, or GROQ_API_KEY set — AI Judge running in stub mode (neutral flat scorecards).");
     }
   }
 
@@ -74,7 +81,7 @@ export class JudgeService {
     if (this.provider === "stub") return ctx.participants.map((p) => this.stubScorecard(p.userId));
 
     try {
-      const cards = this.provider === "anthropic" ? await this.scoreWithAnthropic(ctx) : await this.scoreWithGemini(ctx);
+      const cards = await this.scoreWithProvider(ctx);
       return this.toScorecards(cards, ctx.participants);
     } catch (err) {
       this.logger.error(`AI Judge scoring failed (${this.provider}), falling back to neutral scorecards: ${(err as Error).message}`);
@@ -82,28 +89,43 @@ export class JudgeService {
     }
   }
 
-  private async scoreWithAnthropic(ctx: { topicTitle: string; transcript: JudgeTranscriptMessage[] }): Promise<Array<Record<string, unknown>>> {
-    const response = await this.anthropicClient!.messages.create({
-      model: this.anthropicModel,
-      max_tokens: 1200,
-      system: JUDGE_SYSTEM_PROMPT,
-      tools: [JUDGE_TOOL],
-      tool_choice: { type: "tool", name: "submit_scorecards" },
-      messages: [{ role: "user", content: buildJudgeUserPrompt(ctx) }],
-    });
-
-    const toolUse = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
-    if (!toolUse) throw new Error("Judge did not return a tool call");
-    const input = toolUse.input as { scorecards: Array<Record<string, unknown>> };
-    return input.scorecards;
-  }
-
-  private async scoreWithGemini(ctx: { topicTitle: string; transcript: JudgeTranscriptMessage[] }): Promise<Array<Record<string, unknown>>> {
-    const result = await this.geminiModel!.generateContent(buildJudgeUserPrompt(ctx));
-    const parsed = JSON.parse(result.response.text()) as { scorecards: Array<Record<string, unknown>> };
-    if (!Array.isArray(parsed.scorecards) || parsed.scorecards.length !== 2) {
-      throw new Error("Gemini did not return exactly two scorecards");
+  private async scoreWithProvider(ctx: { topicTitle: string; transcript: JudgeTranscriptMessage[] }): Promise<Array<Record<string, unknown>>> {
+    if (this.provider === "anthropic") {
+      const response = await this.anthropicClient!.messages.create({
+        model: this.anthropicModel,
+        max_tokens: 1200,
+        system: JUDGE_SYSTEM_PROMPT,
+        tools: [JUDGE_TOOL],
+        tool_choice: { type: "tool", name: "submit_scorecards" },
+        messages: [{ role: "user", content: buildJudgeUserPrompt(ctx) }],
+      });
+      const toolUse = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+      if (!toolUse) throw new Error("Judge did not return a tool call");
+      const input = toolUse.input as { scorecards: Array<Record<string, unknown>> };
+      return input.scorecards;
     }
+
+    if (this.provider === "gemini") {
+      const result = await this.geminiModel!.generateContent(buildJudgeUserPrompt(ctx));
+      const parsed = JSON.parse(result.response.text()) as { scorecards: Array<Record<string, unknown>> };
+      if (!Array.isArray(parsed.scorecards) || parsed.scorecards.length !== 2) throw new Error("Gemini did not return exactly two scorecards");
+      return parsed.scorecards;
+    }
+
+    // Groq (OpenAI-compatible chat completions, JSON mode)
+    const completion = await this.groqClient!.chat.completions.create({
+      model: this.groqModel,
+      max_tokens: 1200,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: JUDGE_SYSTEM_PROMPT + JSON_MODE_INSTRUCTIONS },
+        { role: "user", content: buildJudgeUserPrompt(ctx) },
+      ],
+    });
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) throw new Error("Groq returned no content");
+    const parsed = JSON.parse(raw) as { scorecards: Array<Record<string, unknown>> };
+    if (!Array.isArray(parsed.scorecards) || parsed.scorecards.length !== 2) throw new Error("Groq did not return exactly two scorecards");
     return parsed.scorecards;
   }
 

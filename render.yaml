@@ -34,10 +34,14 @@ services:
         value: claude-sonnet-5
       - key: GEMINI_MODEL
         value: gemini-2.0-flash-lite
-      # Set these three in the Render dashboard after first deploy:
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      # Set these four in the Render dashboard after first deploy:
       - key: WEB_ORIGIN
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
         sync: false

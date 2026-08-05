@@ -2,10 +2,11 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import { DebateSide } from "@debate/shared";
 import { DEBATER_SYSTEM_PROMPT, DebaterContextMessage, buildDebaterUserPrompt } from "./prompts/debater.prompt";
 
-type Provider = "anthropic" | "gemini" | "stub";
+type Provider = "anthropic" | "gemini" | "groq" | "stub";
 
 /**
  * The AI practice opponent (blueprint §28's cold-start mitigation): stands
@@ -13,11 +14,12 @@ type Provider = "anthropic" | "gemini" | "stub";
  * side — a completely different job from the neutral Moderator/Judge, so it
  * gets its own prompt and its own service rather than reusing theirs.
  *
- * Provider choice, in order: Anthropic (if ANTHROPIC_API_KEY set) → Gemini
- * (if GEMINI_API_KEY set — Google's free tier needs no billing) → stub.
- * Only this service supports the Gemini fallback: it's plain text
- * generation, unlike the Moderator/Judge's tool-calling flows, which Gemini
- * models via a different API shape not worth replicating for this MVP.
+ * Provider order, all free-tier-friendly except Anthropic: Anthropic (if
+ * ANTHROPIC_API_KEY set) → Gemini (if GEMINI_API_KEY set) → Groq (if
+ * GROQ_API_KEY set — often the most generous free tier of the three) →
+ * stub. Only this service and the Judge support the free fallbacks; the
+ * Moderator's tool-calling flow isn't worth replicating across three
+ * different function-calling APIs for this MVP.
  */
 @Injectable()
 export class DebaterService {
@@ -26,11 +28,15 @@ export class DebaterService {
   private readonly anthropicClient: Anthropic | null = null;
   private readonly anthropicModel: string;
   private readonly geminiModel: GenerativeModel | null = null;
+  private readonly groqClient: Groq | null = null;
+  private readonly groqModel: string;
 
   constructor(private readonly config: ConfigService) {
     const anthropicKey = this.config.get<string>("ANTHROPIC_API_KEY");
     const geminiKey = this.config.get<string>("GEMINI_API_KEY");
+    const groqKey = this.config.get<string>("GROQ_API_KEY");
     this.anthropicModel = this.config.get<string>("JUDGE_MODEL", "claude-sonnet-5");
+    this.groqModel = this.config.get<string>("GROQ_MODEL", "llama-3.3-70b-versatile");
 
     if (anthropicKey) {
       this.anthropicClient = new Anthropic({ apiKey: anthropicKey });
@@ -42,9 +48,12 @@ export class DebaterService {
         systemInstruction: DEBATER_SYSTEM_PROMPT,
       });
       this.provider = "gemini";
+    } else if (groqKey) {
+      this.groqClient = new Groq({ apiKey: groqKey });
+      this.provider = "groq";
     } else {
       this.provider = "stub";
-      this.logger.warn("No ANTHROPIC_API_KEY or GEMINI_API_KEY set — AI practice opponent running in stub mode.");
+      this.logger.warn("No ANTHROPIC_API_KEY, GEMINI_API_KEY, or GROQ_API_KEY set — AI practice opponent running in stub mode.");
     }
   }
 
@@ -55,7 +64,7 @@ export class DebaterService {
     recentTranscript: DebaterContextMessage[];
   }): Promise<string> {
     if (this.provider === "stub") {
-      return `(Stub AI opponent — set ANTHROPIC_API_KEY or GEMINI_API_KEY for real arguments.) As the ${ctx.side.toLowerCase()}, I'd push back on that: "${ctx.topicTitle}" deserves a harder look at the tradeoffs here.`;
+      return `(Stub AI opponent — set an API key for real arguments.) As the ${ctx.side.toLowerCase()}, I'd push back on that: "${ctx.topicTitle}" deserves a harder look at the tradeoffs here.`;
     }
 
     try {
@@ -70,10 +79,21 @@ export class DebaterService {
         return textBlock?.text.trim() ?? "(The AI opponent had nothing to add this turn.)";
       }
 
-      // Gemini
-      const result = await this.geminiModel!.generateContent(buildDebaterUserPrompt(ctx));
-      const text = result.response.text().trim();
-      return text || "(The AI opponent had nothing to add this turn.)";
+      if (this.provider === "gemini") {
+        const result = await this.geminiModel!.generateContent(buildDebaterUserPrompt(ctx));
+        return result.response.text().trim() || "(The AI opponent had nothing to add this turn.)";
+      }
+
+      // Groq (OpenAI-compatible chat completions)
+      const completion = await this.groqClient!.chat.completions.create({
+        model: this.groqModel,
+        max_tokens: 300,
+        messages: [
+          { role: "system", content: DEBATER_SYSTEM_PROMPT },
+          { role: "user", content: buildDebaterUserPrompt(ctx) },
+        ],
+      });
+      return completion.choices[0]?.message?.content?.trim() || "(The AI opponent had nothing to add this turn.)";
     } catch (err) {
       this.logger.error(`AI opponent generation failed (${this.provider}): ${(err as Error).message}`);
       return "(The AI opponent hit an error generating a response this turn.)";
